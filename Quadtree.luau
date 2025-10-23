@@ -38,21 +38,60 @@ type Quadtree = typeof(setmetatable({} :: {
 	_capacity: number,
 	_subdivided: boolean,
 
-	GetItemsInRange: (self: Quadtree, point: Vector2, radius: number) -> (),
+	GetItemsInRange: (self: Quadtree, point: Vector2, radius: number) -> ({any}),
 	Contains: (self: Quadtree, position: Vector2) -> (boolean),
 	Insert: (self: Quadtree, position: Vector2, item: any) -> (boolean),
+	Clear: (self: Quadtree) -> (),
 	Subdivide: (self: Quadtree) -> (),
 
 	new: (x: number, y: number, width: number, height: number, capacity: number?) -> (Quadtree)
 }, Quadtree))
 
-function Quadtree:Contains(position: Vector2): (boolean)
+function Quadtree:Contains(position: Vector2): boolean
 	return
-		self._position.X >= position.X and
-		self._position.Y >= position.Y and
-		(self._position + self._size).X <= position.X and
-		(self._position + self._size).Y <= position.Y
+		position.X >= self._position.X and
+		position.X <= self._position.X + self._size.X and
+		position.Y >= self._position.Y and
+		position.Y <= self._position.Y + self._size.Y
 end
+
+function Quadtree:GetItemsInRange(point: Vector2, radius: number): {any}
+	local results = {}
+
+	local x1, y1 = self._position.X, self._position.Y
+	local x2, y2 = x1 + self._size.X, y1 + self._size.Y
+	if point.X + radius < x1 or point.X - radius > x2 or
+	   point.Y + radius < y1 or point.Y - radius > y2 then
+		return results
+	end
+
+	for _, entry in ipairs(self._items) do
+		if (entry._position - point).Magnitude <= radius then
+			table.insert(results, entry._data)
+		end
+	end
+
+	if self._subdivided then
+		for _, child in pairs(self._children) do
+			local childResults = child:GetItemsInRange(point, radius)
+			for _, r in ipairs(childResults) do
+				table.insert(results, r)
+			end
+		end
+	end
+
+	return results
+end
+
+function Quadtree:Clear()
+	self._items = {}
+	if self._subdivided then
+		for _, child in pairs(self._children) do
+			child:Clear()
+		end
+	end
+end
+
 
 function Quadtree:Subdivide()
 	local halfX = math.floor(self._size.X / 2)
@@ -72,25 +111,25 @@ function Quadtree:Subdivide()
 	self._subdivided = true
 end
 
-function Quadtree:Insert(position: Vector2, item: any): (boolean)
+function Quadtree:Insert(position: Vector2, item: any): boolean
 	if not self:Contains(position) then return false end
 
 	if #self._items < self._capacity and not self._subdivided then
-		table.insert(self._items, {
-			_position = position,
-			_data = item,
-		})
-	elseif self._subdivided then
-		self:Subdivide()
-
-		for _, child in pairs(self._children) do
-			child:Insert(position, item)
-		end
-	else
-		return false
+		table.insert(self._items, { _position = position, _data = item })
+		return true
 	end
 
-	return true
+	if not self._subdivided then
+		self:Subdivide()
+	end
+
+	for _, child in pairs(self._children) do
+		if child:Insert(position, item) then
+			return true
+		end
+	end
+
+	return false
 end
 
 function Quadtree.new(x: number, y: number, width: number, height: number, capacity: number?): Quadtree
